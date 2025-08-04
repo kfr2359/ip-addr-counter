@@ -105,7 +105,7 @@ func parseIPAddr(line []byte) uint32 {
 	ipAddrPartsBytes := bytes.Split(line, []byte{'.'})
 	var ipAddrParts [4]byte
 	for i := range 4 {
-		ipAddrPart := unsignedByteAtoi(ipAddrPartsBytes[i])
+		ipAddrPart := byteAtoi(ipAddrPartsBytes[i])
 		ipAddrParts[i] = byte(ipAddrPart)
 	}
 	// we can use any endianness
@@ -113,10 +113,10 @@ func parseIPAddr(line []byte) uint32 {
 }
 
 // simplified implementation of strings.Atoi for byte slice
-func unsignedByteAtoi(raw []byte) int {
-	result := 0
+func byteAtoi(raw []byte) byte {
+	var result byte
 	for i := 0; i < len(raw); i++ {
-		result = result*10 + int(raw[i]-'0')
+		result = result*10 + raw[i] - '0'
 	}
 	return result
 }
