@@ -52,8 +52,9 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 
 	// allocate bitmap for each possible IPv4 address
 	// let addr be 0x12345678, it's already a kind of index for our bitmap
-	// elem of bitmap - 64 bits, can hold 64 (2^6) unique addresses or last 6 bits
-	addressesMap := make([]uint64, 2<<(32-6))
+	// we need 2^32 bits to store ore or 2^(32-1) bytes
+	// elem of bitmap - 64 bits, can hold 64 (2^6) unique addresses or last 6 bits of address
+	addressesMap := make([]uint64, 2<<(32-1-6))
 
 	numReadWorkers := uint(*inputNumReadWorkers)
 	readChan := make(chan [][]byte, 100)
