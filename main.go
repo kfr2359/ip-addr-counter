@@ -22,20 +22,27 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
 	startTime := time.Now()
-	result, err := countIPAddressesBitMap(*inputFilePathFlag)
+	addressesMap, err := loadIPAddresses(*inputFilePathFlag)
 	if err != nil {
 		log.Fatal(err)
 	}
 	endTime := time.Now()
+	fmt.Printf("IP addresses were loaded in bitmap for for %s\n", endTime.Sub(startTime))
+
+	startTime = time.Now()
+	result := countIPAddressesBitMap(addressesMap)
+	endTime = time.Now()
+	fmt.Printf("IP addresses were counted for %s\n", endTime.Sub(startTime))
+
 	fmt.Printf("Unique IP addresses count: %d\n", result)
-	fmt.Printf("Counted for %s\n", endTime.Sub(startTime))
 }
 
-func countIPAddressesBitMap(filePath string) (int, error) {
+func loadIPAddresses(filePath string) ([]uint64, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return 0, fmt.Errorf("open file %s: %w", filePath, err)
+		return nil, fmt.Errorf("open file %s: %w", filePath, err)
 	}
 	defer func() {
 		if err = file.Close(); err != nil {
@@ -54,16 +61,9 @@ func countIPAddressesBitMap(filePath string) (int, error) {
 		go func() {
 			for ipRawChunk := range readChan {
 				for _, ipRaw := range ipRawChunk {
-					if len(ipRaw) == 0 {
-						// reached end of chunk
+					if needContinue := loadIPRaw(ipRaw, addressesMap); !needContinue {
 						break
 					}
-					ipAddr := parseIPAddr(ipRaw)
-					mapIndex := ipAddr >> 6
-					// take last 6 bits of addr
-					mapElemShift := ipAddr & 0x3f
-					// and shift 1 to the left by this value to find bit index
-					addressesMap[mapIndex] |= 1 << mapElemShift
 				}
 			}
 		}()
@@ -88,17 +88,20 @@ func countIPAddressesBitMap(filePath string) (int, error) {
 		readChan <- ipRawChunk
 	}
 	if err = scanner.Err(); err != nil {
-		return 0, fmt.Errorf("scan file %s: %w", filePath, err)
+		return nil, fmt.Errorf("scan file %s: %w", filePath, err)
 	}
 
 	close(readChan)
+	return addressesMap, nil
+}
 
+func countIPAddressesBitMap(addressesMap []uint64) int {
 	result := 0
 	for _, addressesElem := range addressesMap {
 		result += bits.OnesCount64(addressesElem)
 	}
 
-	return result, nil
+	return result
 }
 
 func parseIPAddr(line []byte) uint32 {
@@ -119,4 +122,19 @@ func byteAtoi(raw []byte) byte {
 		result = result*10 + raw[i] - '0'
 	}
 	return result
+}
+
+func loadIPRaw(ipRaw []byte, addressesMap []uint64) bool {
+	if len(ipRaw) == 0 {
+		// reached end of chunk
+		return false
+	}
+	ipAddr := parseIPAddr(ipRaw)
+	mapIndex := ipAddr >> 6
+	// take last 6 bits of addr
+	mapElemShift := ipAddr & 0x3f
+	// and shift 1 to the left by this value to find bit index
+	addressesMap[mapIndex] |= 1 << mapElemShift
+
+	return true
 }
