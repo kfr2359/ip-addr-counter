@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/bits"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -29,7 +30,7 @@ func main() {
 		log.Fatal(err)
 	}
 	endTime := time.Now()
-	fmt.Printf("IP addresses were loaded in bitmap for for %s\n", endTime.Sub(startTime))
+	fmt.Printf("IP addresses were loaded in bitmap for %s\n", endTime.Sub(startTime))
 
 	startTime = time.Now()
 	result := countIPAddressesBitMap(addressesMap)
@@ -56,8 +57,23 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 	// elem of bitmap - 64 bits, can hold 64 (2^6) unique addresses or last 6 bits of address
 	addressesMap := make([]uint64, 2<<(32-1-6))
 
-	bufSize := *inputBufferSize
+	ipsRawChan := make(chan [][]byte, 100)
+	wg := sync.WaitGroup{}
+	for range *inputNumReadWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ipsRaw := range ipsRawChan {
+				for i := 0; i < len(ipsRaw); i++ {
+					loadIPRaw(ipsRaw[i], addressesMap)
+				}
+				ipsRaw = nil
+			}
+		}()
+	}
+
 	leftoverBuffer := make([]byte, 0, 16) // max 3 symbols per ip byte, 3 dots, 1 newline
+	bufSize := *inputBufferSize
 	processBuf := make([]byte, bufSize+16)
 	for {
 		processBuf = processBuf[:len(leftoverBuffer)+bufSize]
@@ -71,15 +87,18 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 		}
 		processBuf = processBuf[:len(leftoverBuffer)+bytesRead]
 
-		ipsRaw := bytes.Split(processBuf, []byte{'\n'})
-		for i := 0; i < len(ipsRaw)-1; i++ {
-			if needContinue := loadIPRaw(ipsRaw[i], addressesMap); !needContinue {
-				break
-			}
-		}
+		processBufCpy := make([]byte, len(processBuf))
+		copy(processBufCpy, processBuf)
+		ipsRaw := bytes.Split(processBufCpy, []byte{'\n'})
+		ipsRawChan <- ipsRaw[:len(ipsRaw)-1]
 		leftoverBuffer = ipsRaw[len(ipsRaw)-1]
 	}
-	loadIPRaw(leftoverBuffer, addressesMap)
+	if len(leftoverBuffer) > 0 && leftoverBuffer[0] != 0 {
+		loadIPRaw(leftoverBuffer, addressesMap)
+	}
+
+	close(ipsRawChan)
+	wg.Wait()
 
 	return addressesMap, nil
 }
@@ -93,6 +112,15 @@ func countIPAddressesBitMap(addressesMap []uint64) int {
 	return result
 }
 
+func loadIPRaw(ipRaw []byte, addressesMap []uint64) {
+	ipAddr := parseIPAddr(ipRaw)
+	mapIndex := ipAddr >> 6
+	// take last 6 bits of addr
+	mapElemShift := ipAddr & 0x3f
+	// and shift 1 to the left by this value to find bit index
+	addressesMap[mapIndex] |= 1 << mapElemShift
+}
+
 func parseIPAddr(line []byte) uint32 {
 	ipAddrPartsBytes := bytes.Split(line, []byte{'.'})
 	if len(ipAddrPartsBytes) != 4 {
@@ -100,8 +128,7 @@ func parseIPAddr(line []byte) uint32 {
 	}
 	var ipAddrParts [4]byte
 	for i := range 4 {
-		ipAddrPart := byteAtoi(ipAddrPartsBytes[i])
-		ipAddrParts[i] = ipAddrPart
+		ipAddrParts[i] = byteAtoi(ipAddrPartsBytes[i])
 	}
 	// we can use any endianness
 	return binary.BigEndian.Uint32(ipAddrParts[:])
@@ -114,19 +141,4 @@ func byteAtoi(raw []byte) byte {
 		result = result*10 + raw[i] - '0'
 	}
 	return result
-}
-
-func loadIPRaw(ipRaw []byte, addressesMap []uint64) bool {
-	if len(ipRaw) == 0 || ipRaw[0] == 0 {
-		// reached end of chunk
-		return false
-	}
-	ipAddr := parseIPAddr(ipRaw)
-	mapIndex := ipAddr >> 6
-	// take last 6 bits of addr
-	mapElemShift := ipAddr & 0x3f
-	// and shift 1 to the left by this value to find bit index
-	addressesMap[mapIndex] |= 1 << mapElemShift
-
-	return true
 }
