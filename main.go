@@ -57,7 +57,7 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 	// elem of bitmap - 64 bits, can hold 64 (2^6) unique addresses or last 6 bits of address
 	addressesMap := make([]uint64, 2<<(32-1-6))
 
-	ipsRawChan := make(chan [][]byte, 100)
+	ipsRawChan := make(chan [][]byte, 200)
 	wg := sync.WaitGroup{}
 	for range *inputNumReadWorkers {
 		wg.Add(1)
@@ -122,14 +122,18 @@ func loadIPRaw(ipRaw []byte, addressesMap []uint64) {
 }
 
 func parseIPAddr(line []byte) uint32 {
-	ipAddrPartsBytes := bytes.Split(line, []byte{'.'})
-	if len(ipAddrPartsBytes) != 4 {
-		log.Fatalf("unexprected number of parts in ip \"%s\"", string(line))
-	}
+	// no safety and easyness for reading, all for speed
+	var dotIndexes [3]int
+	dotIndexes[0] = bytes.IndexByte(line, '.')
+	dotIndexes[1] = bytes.IndexByte(line[dotIndexes[0]+1:], '.') + dotIndexes[0] + 1
+	dotIndexes[2] = bytes.IndexByte(line[dotIndexes[1]+1:], '.') + dotIndexes[1] + 1
+
 	var ipAddrParts [4]byte
-	for i := range 4 {
-		ipAddrParts[i] = byteAtoi(ipAddrPartsBytes[i])
-	}
+	ipAddrParts[0] = byteAtoi(line[:dotIndexes[0]])
+	ipAddrParts[1] = byteAtoi(line[dotIndexes[0]+1 : dotIndexes[1]])
+	ipAddrParts[2] = byteAtoi(line[dotIndexes[1]+1 : dotIndexes[2]])
+	ipAddrParts[3] = byteAtoi(line[dotIndexes[2]+1:])
+
 	// we can use any endianness
 	return binary.BigEndian.Uint32(ipAddrParts[:])
 }
