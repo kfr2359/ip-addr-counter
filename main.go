@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/bits"
 	"os"
@@ -14,11 +14,11 @@ import (
 
 var inputFilePathFlag = flag.String("i", "input.txt", "input file path with IP addresses")
 var inputNumReadWorkers = flag.Int("w", 6, "number of read worker")
-var inputIPChunkSize = flag.Int("c", 10000, "size of raw ip chunk that is passed to workers")
+var inputBufferSize = flag.Int("c", 1024*1024, "size of input read buffer")
 
 func main() {
 	flag.Parse()
-	if inputFilePathFlag == nil || inputNumReadWorkers == nil || inputIPChunkSize == nil {
+	if inputFilePathFlag == nil || inputNumReadWorkers == nil || inputBufferSize == nil {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -56,43 +56,37 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 	// elem of bitmap - 64 bits, can hold 64 (2^6) unique addresses or last 6 bits of address
 	addressesMap := make([]uint64, 2<<(32-1-6))
 
-	numReadWorkers := uint(*inputNumReadWorkers)
-	readChan := make(chan [][]byte, 100)
-	for range numReadWorkers {
-		go func() {
-			for ipRawChunk := range readChan {
-				for _, ipRaw := range ipRawChunk {
-					if needContinue := loadIPRaw(ipRaw, addressesMap); !needContinue {
-						break
-					}
-				}
-			}
-		}()
-	}
-
-	ipChunkSize := *inputIPChunkSize
-	ipRawChunk := make([][]byte, ipChunkSize)
-	i := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		ipRaw := scanner.Bytes()
-		ipRawChunk[i] = make([]byte, len(ipRaw))
-		copy(ipRawChunk[i], ipRaw)
-		i++
-		if i == ipChunkSize {
-			readChan <- ipRawChunk
-			ipRawChunk = make([][]byte, ipChunkSize)
-			i = 0
+	bufSize := *inputBufferSize
+	inputBuffer := make([]byte, bufSize)
+	leftoverBuffer := make([]byte, 0, 16) // max 3 symbols per ip byte, 3 dots, 1 newline
+	processBuf := make([]byte, bufSize+16)
+	for {
+		bytesRead, err := file.Read(inputBuffer)
+		if err == io.EOF {
+			break
 		}
-	}
-	if i > 0 {
-		readChan <- ipRawChunk
-	}
-	if err = scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan file %s: %w", filePath, err)
-	}
+		if err != nil {
+			return nil, fmt.Errorf("read input chunk: %w", err)
+		}
+		if bytesRead < bufSize {
+			inputBuffer = inputBuffer[:bytesRead]
+		}
 
-	close(readChan)
+		// preset processBuf len for copy operations, or else it will be messed up
+		processBuf = processBuf[:len(leftoverBuffer)+len(inputBuffer)]
+		copy(processBuf, leftoverBuffer)
+		copy(processBuf[len(leftoverBuffer):], inputBuffer)
+
+		ipsRaw := bytes.Split(processBuf, []byte{'\n'})
+		for i := 0; i < len(ipsRaw)-1; i++ {
+			if needContinue := loadIPRaw(ipsRaw[i], addressesMap); !needContinue {
+				break
+			}
+		}
+		leftoverBuffer = ipsRaw[len(ipsRaw)-1]
+	}
+	loadIPRaw(leftoverBuffer, addressesMap)
+
 	return addressesMap, nil
 }
 
@@ -107,10 +101,13 @@ func countIPAddressesBitMap(addressesMap []uint64) int {
 
 func parseIPAddr(line []byte) uint32 {
 	ipAddrPartsBytes := bytes.Split(line, []byte{'.'})
+	if len(ipAddrPartsBytes) != 4 {
+		log.Fatalf("unexprected number of parts in ip \"%s\"", string(line))
+	}
 	var ipAddrParts [4]byte
 	for i := range 4 {
 		ipAddrPart := byteAtoi(ipAddrPartsBytes[i])
-		ipAddrParts[i] = byte(ipAddrPart)
+		ipAddrParts[i] = ipAddrPart
 	}
 	// we can use any endianness
 	return binary.BigEndian.Uint32(ipAddrParts[:])
@@ -126,7 +123,7 @@ func byteAtoi(raw []byte) byte {
 }
 
 func loadIPRaw(ipRaw []byte, addressesMap []uint64) bool {
-	if len(ipRaw) == 0 {
+	if len(ipRaw) == 0 || ipRaw[0] == 0 {
 		// reached end of chunk
 		return false
 	}
