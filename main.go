@@ -57,25 +57,19 @@ func loadIPAddresses(filePath string) ([]uint64, error) {
 	addressesMap := make([]uint64, 2<<(32-1-6))
 
 	bufSize := *inputBufferSize
-	inputBuffer := make([]byte, bufSize)
 	leftoverBuffer := make([]byte, 0, 16) // max 3 symbols per ip byte, 3 dots, 1 newline
 	processBuf := make([]byte, bufSize+16)
 	for {
-		bytesRead, err := file.Read(inputBuffer)
+		processBuf = processBuf[:len(leftoverBuffer)+bufSize]
+		copy(processBuf, leftoverBuffer)
+		bytesRead, err := file.Read(processBuf[len(leftoverBuffer):])
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read input chunk: %w", err)
 		}
-		if bytesRead < bufSize {
-			inputBuffer = inputBuffer[:bytesRead]
-		}
-
-		// preset processBuf len for copy operations, or else it will be messed up
-		processBuf = processBuf[:len(leftoverBuffer)+len(inputBuffer)]
-		copy(processBuf, leftoverBuffer)
-		copy(processBuf[len(leftoverBuffer):], inputBuffer)
+		processBuf = processBuf[:len(leftoverBuffer)+bytesRead]
 
 		ipsRaw := bytes.Split(processBuf, []byte{'\n'})
 		for i := 0; i < len(ipsRaw)-1; i++ {
