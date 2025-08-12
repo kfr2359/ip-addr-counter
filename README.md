@@ -4,8 +4,11 @@ This is a solution for https://github.com/Ecwid/new-job/blob/master/IP-Addr-Coun
 
 ## Solution description
 The solution is to create a bitmap for all possible IP addresses where each bit represents 1 unique IP address, then count ones in it.
+
 Total number of IPv4 addresses is 2^32, that means size of the bitmap is 2^29 bytes ~ 537 MB. This amount of memory is occupied in any case.
+
 Loading of 1 IP address takes O(1) - calculates offset in bitmap and set 1 bit. Parallel loading is possible as long as the access to single bitmap element (uint64, machine word) is atomic.
+
 Counting addresses after loading takes O(1) - iterate the bitmap and count ones in each byte. The constant here is big but still a constant, moreover counting bits in sequental bytes is trivial operation, asm instruction including vector ones can be utilized.
 
 ## Results
