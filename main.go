@@ -10,6 +10,7 @@ import (
 	"math/bits"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -118,7 +119,7 @@ func loadIPRaw(ipRaw []byte, addressesMap []uint64) {
 	// take last 6 bits of addr
 	mapElemShift := ipAddr & 0x3f
 	// and shift 1 to the left by this value to find bit index
-	addressesMap[mapIndex] |= 1 << mapElemShift
+	atomic.OrUint64(&addressesMap[mapIndex], 1<<mapElemShift)
 }
 
 func parseIPAddr(line []byte) uint32 {
@@ -141,7 +142,7 @@ func parseIPAddr(line []byte) uint32 {
 // simplified implementation of strings.Atoi for byte slice
 func byteAtoi(raw []byte) byte {
 	var result byte
-	for i := 0; i < len(raw); i++ {
+	for i := range len(raw) {
 		result = result*10 + raw[i] - '0'
 	}
 	return result
