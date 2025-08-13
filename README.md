@@ -13,11 +13,14 @@ Counting addresses after loading takes O(1) - iterate the bitmap and count ones 
 
 ## Results
 Testing machine: MacBook Air 2020 M1 8 cores, 16 GB RAM
+
 Input file: https://ecwid-vgv-storage.s3.eu-central-1.amazonaws.com/ip_addresses.zip (120 GB uncompressed, was taken from the task)
 
 ### file.Read, parallel loading into bitmap, 30 workers, 1MB read buffer:
 Peak memory uasge 1.6 GB (memory isn't freed to OS immediately by Go, then memory drops to ~1.1 GB)
+
 Avg reading 784 MB/sec
+
 CPU load ~400%
 ```
 IP addresses were loaded in bitmap for 2m33.461633542s
